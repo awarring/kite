@@ -15,15 +15,14 @@
  */
 package org.kitesdk.data.hbase.filters;
 
-import org.kitesdk.data.DatasetException;
-import org.kitesdk.data.hbase.impl.EntitySchema;
-import org.kitesdk.data.hbase.impl.EntitySchema.FieldMapping;
-import org.kitesdk.data.hbase.impl.EntitySerDe;
-import org.kitesdk.data.hbase.impl.MappingType;
-
 import org.apache.hadoop.hbase.filter.CompareFilter;
 import org.apache.hadoop.hbase.filter.Filter;
 import org.apache.hadoop.hbase.filter.RegexStringComparator;
+import org.kitesdk.data.DatasetException;
+import org.kitesdk.data.ColumnMappingDescriptor.MappingType;
+import org.kitesdk.data.hbase.impl.EntitySchema;
+import org.kitesdk.data.hbase.impl.EntitySerDe;
+import org.kitesdk.data.spi.FieldMapping;
 
 /**
  * An EntityFilter that will perform a regular expression filter on an entity's
@@ -36,7 +35,8 @@ public class RegexEntityFilter implements EntityFilter {
   public RegexEntityFilter(EntitySchema entitySchema,
       EntitySerDe<?> entitySerDe, String fieldName, String regex,
       boolean isEqual) {
-    FieldMapping fieldMapping = entitySchema.getFieldMapping(fieldName);
+    FieldMapping fieldMapping = entitySchema.getColumnMappingDescriptor()
+        .getFieldMapping(fieldName);
     if (fieldMapping.getMappingType() != MappingType.COLUMN) {
       throw new DatasetException(
           "SingleColumnValueFilter only compatible with COLUMN mapping types.");

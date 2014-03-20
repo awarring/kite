@@ -1,0 +1,4 @@
+[
+  { "source": "username", "type": "column", "value": "meta:username" },
+  { "source": "email", "type": "column", "value": "meta:email" }
+]

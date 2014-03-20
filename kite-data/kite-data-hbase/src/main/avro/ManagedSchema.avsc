@@ -2,12 +2,18 @@
   "type": "record",
   "name": "ManagedSchema",
   "namespace": "org.kitesdk.data.hbase.manager.generated",
+  
+  "partitionStrategy": [
+    { "type": "identity", "sourceName": "table" },
+    { "type": "identity", "sourceName": "name" }
+  ],
+  
   "fields": [
     { "name": "table", "type": "string",
-      "mapping": { "type": "key", "value": "0" } },
+      "mapping": { "type": "column", "value": "meta:table" } },
 
     { "name": "name", "type": "string",
-      "mapping": { "type": "key", "value": "1" } },
+      "mapping": { "type": "column", "value": "meta:name" } },
       
 	{ "name": "schemaType", "type": "string",
       "mapping": { "type": "column", "value": "meta:schema_type" } },

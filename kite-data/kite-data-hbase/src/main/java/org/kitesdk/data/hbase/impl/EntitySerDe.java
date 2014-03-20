@@ -15,9 +15,6 @@
  */
 package org.kitesdk.data.hbase.impl;
 
-import org.kitesdk.data.SchemaValidationException;
-import org.kitesdk.data.hbase.impl.EntitySchema.FieldMapping;
-
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
@@ -26,6 +23,9 @@ import java.util.Map.Entry;
 import org.apache.hadoop.hbase.client.Put;
 import org.apache.hadoop.hbase.client.Result;
 import org.apache.hadoop.hbase.util.Bytes;
+import org.kitesdk.data.SchemaValidationException;
+import org.kitesdk.data.ColumnMappingDescriptor.MappingType;
+import org.kitesdk.data.spi.FieldMapping;
 
 /**
  * This class handles entity serialization and deserialization. It's able to
@@ -183,6 +183,16 @@ public abstract class EntitySerDe<E> {
       String fieldName, byte[] columnKeyBytes);
 
   /**
+   * If a field has a default value, returns the default value. Otherwise,
+   * returns null.
+   * 
+   * @param fieldName
+   *          The name of the field to return the default value for.
+   * @return The default value.
+   */
+  public abstract Object getDefaultValue(String fieldName);
+
+  /**
    * Get the EntityComposer this EntitySerDe uses to compose entity fields.
    * 
    * @return The EntityComposer
@@ -292,7 +302,7 @@ public abstract class EntitySerDe<E> {
       byte[] qualifier, Result result) {
     byte[] bytes = result.getValue(family, qualifier);
     if (bytes == null) {
-      return null;
+      return getDefaultValue(fieldName);
     } else {
       return deserializeColumnValueFromBytes(fieldName, bytes);
     }

@@ -251,8 +251,8 @@ public class AvroUtils {
     } catch (NoSuchFieldException e) {
       throw new DatasetException(e);
     }
-    return new AvroEntitySchema(entitySchema.getTables(), schemaField,
-        entitySchema.getRawSchema(), entitySchema.getFieldMappings());
+    return new AvroEntitySchema(schemaField,
+        entitySchema.getRawSchema(), entitySchema.getColumnMappingDescriptor());
   }
 
   /**

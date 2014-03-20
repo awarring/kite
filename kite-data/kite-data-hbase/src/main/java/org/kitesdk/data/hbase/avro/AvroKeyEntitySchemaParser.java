@@ -15,30 +15,37 @@
  */
 package org.kitesdk.data.hbase.avro;
 
-import org.kitesdk.data.SchemaValidationException;
-import org.kitesdk.data.hbase.impl.EntitySchema.FieldMapping;
-import org.kitesdk.data.hbase.impl.KeyEntitySchemaParser;
-import org.kitesdk.data.hbase.impl.MappingType;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Iterator;
 import java.util.List;
-import java.util.Map;
 
 import org.apache.avro.Schema;
-import org.codehaus.jackson.JsonNode;
-import org.codehaus.jackson.map.ObjectMapper;
+import org.kitesdk.data.ColumnMappingDescriptor;
+import org.kitesdk.data.ColumnMappingDescriptor.MappingType;
+import org.kitesdk.data.PartitionStrategy;
+import org.kitesdk.data.SchemaValidationException;
+import org.kitesdk.data.hbase.impl.KeyEntitySchemaParser;
+import org.kitesdk.data.spi.ColumnMappingDescriptorParser;
+import org.kitesdk.data.spi.FieldMapping;
+import org.kitesdk.data.spi.FieldPartitioner;
+import org.kitesdk.data.spi.PartitionStrategyParser;
+import org.kitesdk.data.spi.partition.IdentityFieldPartitioner;
 
 /**
- * This implementation parses Avro schemas for both the key and entities. The
- * entities contain metadata in annotations of the Avro record and Avro record
- * fields.
+ * This implementation parses the AvroKeySchema and AvroEntitySchema from Avro
+ * schemas. The entities can contain metadata in annotations of the Avro record
+ * and Avro record fields.
  * 
  * Each field must have a mapping annotation, which specifies how that field is
  * mapped to an HBase column.
  * 
- * Allowed mapping types are "column", "keyAsColumn", and "occVersion".
+ * Allowed mapping types are "key", "column", "keyAsColumn", and "occVersion".
+ * 
+ * The key mapping type on a field indicates that there is an identity field
+ * partitioner on the field. The identity field partitioners are taken in order.
  * 
  * The column mapping type on a field tells this entity mapper to map that field
  * to the fully_qualified_column.
@@ -47,11 +54,10 @@ import org.codehaus.jackson.map.ObjectMapper;
  * key of the value type to a column in the specified column_family. This
  * annotation is only allowed on map and record types.
  * 
- * The entity record can contain a transactional annotation that tells HBase
- * Common that this entity takes part in transactions
- * 
- * The entity record should also contain a tables annotation, which tells HBase
- * Common which tables this entity can be persisted to.
+ * The occVersion mapping type on a field indicates that the entity participates
+ * in optimistic concurrency control, and the field is the version number that
+ * is automatically incremented by the system to validate that there are no
+ * write conflicts.
  * 
  * Here is an example schema:
  * 
@@ -60,8 +66,9 @@ import org.codehaus.jackson.map.ObjectMapper;
  * { 
  *   "name": "record_name",
  *   "type": "record",
- *   "tables": ["table1", "table2"],
- *   "transactional": "true",
+ *   "partitionStrategy": [
+ *     { "sourceName": "field1", "type": "identity" }
+ *   ],
  *   "fields": [ 
  *     { 
  *       "name": "field1", 
@@ -74,7 +81,6 @@ import org.codehaus.jackson.map.ObjectMapper;
  *       "type": { "type": "map", "values": "string" }, 
  *       "mapping": { "type": "keyAsColumn": "value": "map_family" } 
  *     }
- *     
  *   ]
  * }
  * 
@@ -83,76 +89,69 @@ import org.codehaus.jackson.map.ObjectMapper;
  * An Avro instance of this schema would have its field1 value encoded to the
  * meta:field1 column. Each key/value pair of the field2 map type would have its
  * value mapped to the map_family:[key] column. It will also participate in
- * transactions.
+ * optimistic concurrency control.
  */
 public class AvroKeyEntitySchemaParser implements
     KeyEntitySchemaParser<AvroKeySchema, AvroEntitySchema> {
 
-  @SuppressWarnings("deprecation")
   @Override
   public AvroKeySchema parseKeySchema(String rawSchema) {
     JsonNode schemaAsJson = rawSchemaAsJsonNode(rawSchema);
-    Schema schema = Schema.parse(rawSchema);
-    List<FieldMapping> fieldMappings = getFieldMappings(schemaAsJson, schema);
+    Schema.Parser avroSchemaParser = new Schema.Parser();
+    Schema schema = avroSchemaParser.parse(rawSchema);
 
-    List<FieldMapping> keyFieldMappings = new ArrayList<FieldMapping>();
-    for (FieldMapping fieldMapping : fieldMappings) {
-      if (fieldMapping.getMappingType() == MappingType.KEY) {
-        keyFieldMappings.add(fieldMapping);
-      }
+    ColumnMappingDescriptorParser parser = new ColumnMappingDescriptorParser(
+        schema);
+    List<FieldMapping> fieldMappings = getFieldMappings(parser, schemaAsJson,
+        schema);
+
+    PartitionStrategy partitionStrategy;
+    if (schemaAsJson.has("partitionStrategy")) {
+      partitionStrategy = buildPartitionStrategyFromAnnotation(schema,
+          schemaAsJson, fieldMappings);
+    } else {
+      partitionStrategy = buildPartitionStrategyFromKeyMappings(schema,
+          fieldMappings);
     }
-    return new AvroKeySchema(schema, rawSchema, keyFieldMappings);
+    return new AvroKeySchema(schema, rawSchema, partitionStrategy);
   }
 
-  @SuppressWarnings("deprecation")
+  @Override
+  public AvroKeySchema parseKeySchema(String rawSchema,
+      PartitionStrategy partitionStrategy) {
+    Schema.Parser avroSchemaParser = new Schema.Parser();
+    Schema schema = avroSchemaParser.parse(rawSchema);
+    return new AvroKeySchema(schema, rawSchema, partitionStrategy);
+  }
+
   @Override
   public AvroEntitySchema parseEntitySchema(String rawSchema) {
     JsonNode schemaAsJson = rawSchemaAsJsonNode(rawSchema);
-    Schema schema = Schema.parse(rawSchema);
-    List<FieldMapping> fieldMappings = getFieldMappings(schemaAsJson, schema);
+    Schema.Parser avroSchemaParser = new Schema.Parser();
+    Schema schema = avroSchemaParser.parse(rawSchema);
 
-    List<String> tables = getTables(schemaAsJson);
-    return new AvroEntitySchema(tables, schema, rawSchema, fieldMappings);
+    ColumnMappingDescriptorParser parser = new ColumnMappingDescriptorParser(
+        schema);
+    ColumnMappingDescriptor mappingDescriptor;
+    if (schemaAsJson.has("mapping")) {
+      mappingDescriptor = parser.parse(schemaAsJson.get("mapping").toString());
+    } else {
+      List<FieldMapping> fieldMappings = getFieldMappings(parser, schemaAsJson,
+          schema);
+      mappingDescriptor = new ColumnMappingDescriptor.Builder().fieldMappings(
+          fieldMappings).build();
+    }
+    return new AvroEntitySchema(schema, rawSchema, mappingDescriptor);
   }
 
-  /**
-   * 
-   * @param schemaAsJson
-   * @param schema
-   * @return
-   */
-  private List<FieldMapping> getFieldMappings(JsonNode schemaAsJson,
-      Schema schema) {
-    // Get the mapping of fields to default values.
-    Map<String, Object> defaultValueMap = AvroUtils.getDefaultValueMap(schema);
-    JsonNode fields = schemaAsJson.get("fields");
-    if (fields == null) {
-      throw new SchemaValidationException(
-          "Avro Record Schema must contain fields");
-    }
-
-    // Build the fieldMappingMap, which is a mapping of field names to
-    // AvroFieldMapping instances (which describe the mapping type of the
-    // field).
-    List<FieldMapping> fieldMappings = new ArrayList<FieldMapping>();
-    for (JsonNode recordFieldJson : fields) {
-      String fieldName = recordFieldJson.get("name").getTextValue();
-      Schema.Type type = schema.getField(fieldName).schema().getType();
-      FieldMapping fieldMapping = createFieldMapping(fieldName,
-          recordFieldJson, defaultValueMap, type);
-      if (fieldMapping != null) {
-        fieldMappings.add(fieldMapping);
-      }
-    }
-
-    return fieldMappings;
+  @Override
+  public AvroEntitySchema parseEntitySchema(String rawSchema,
+      ColumnMappingDescriptor columnMappingDescriptor) {
+    Schema.Parser avroSchemaParser = new Schema.Parser();
+    Schema schema = avroSchemaParser.parse(rawSchema);
+    return new AvroEntitySchema(schema, rawSchema, columnMappingDescriptor);
   }
 
-  /**
-   * 
-   * @param rawSchema
-   * @return
-   */
   private JsonNode rawSchemaAsJsonNode(String rawSchema) {
     ObjectMapper mapper = new ObjectMapper();
     JsonNode avroRecordSchemaJson;
@@ -165,95 +164,104 @@ public class AvroKeyEntitySchemaParser implements
     return avroRecordSchemaJson;
   }
 
+  private List<FieldMapping> getFieldMappings(
+      ColumnMappingDescriptorParser parser, JsonNode schemaAsJson, Schema schema) {
+    JsonNode fields = schemaAsJson.get("fields");
+    if (fields == null) {
+      throw new SchemaValidationException(
+          "Avro Record Schema must contain fields");
+    }
+
+    // Build the fieldMappingMap, which is a mapping of field names to
+    // AvroFieldMapping instances (which describe the mapping type of the
+    // field).
+    List<FieldMapping> fieldMappings = new ArrayList<FieldMapping>();
+    for (JsonNode recordFieldJson : fields) {
+      String fieldName = recordFieldJson.get("name").asText();
+      Schema.Type type = schema.getField(fieldName).schema().getType();
+      FieldMapping fieldMapping = createFieldMapping(parser, fieldName,
+          recordFieldJson, type);
+      if (fieldMapping != null) {
+        fieldMappings.add(fieldMapping);
+      }
+    }
+
+    return fieldMappings;
+  }
+
   /**
    * Given a JsonNode representation of an avro record field, return the
    * AvroFieldMapping instance of that field. This instance contains the type of
    * mapping, and the value of that mapping, which will tell the mapping how to
    * map the field to columns in HBase.
    * 
+   * @param parser
+   *          The ColumnMappingDescriptorParser to use to parse FieldMappings.
    * @param fieldName
    *          The name of the field
    * @param recordFieldJson
    *          The Avro record field as a JsonNode.
-   * @param defaultValueMap
-   *          The mapping of fields to default values. Use this to look up
-   *          possible default value.
    * @param type
    *          The field's java type
-   * @return The AvroFieldMapping of this field.
+   * @return The FieldMapping of this field.
    */
-  private FieldMapping createFieldMapping(String fieldName,
-      JsonNode recordFieldJson, Map<String, Object> defaultValueMap,
-      Schema.Type type) {
-    FieldMapping fieldMapping = null;
+  private FieldMapping createFieldMapping(ColumnMappingDescriptorParser parser,
+      String fieldName, JsonNode recordFieldJson, Schema.Type type) {
     JsonNode mappingNode = recordFieldJson.get("mapping");
     if (mappingNode != null) {
-      JsonNode mappingTypeNode = mappingNode.get("type");
-      JsonNode mappingValueNode = mappingNode.get("value");
-      JsonNode prefixValueNode = mappingNode.get("prefix");
-      if (mappingTypeNode == null) {
-        String msg = "mapping attribute must contain type.";
-        throw new SchemaValidationException(msg);
-      }
-
-      MappingType mappingType = null;
-      String mappingValue = null;
-      String prefix = null;
-
-      if (mappingTypeNode.getTextValue().equals("column")) {
-        mappingType = MappingType.COLUMN;
-        if (mappingValueNode == null) {
-          throw new SchemaValidationException(
-              "column mapping type must contain a value.");
-        }
-        mappingValue = mappingValueNode.getTextValue();
-      } else if ((mappingTypeNode.getTextValue().equals("keyAsColumn"))) {
-        mappingType = MappingType.KEY_AS_COLUMN;
-        if (mappingValueNode == null) {
-          throw new SchemaValidationException(
-              "keyAsColumn mapping type must contain a value.");
-        }
-        mappingValue = mappingValueNode.getTextValue();
-        if (prefixValueNode != null) {
-          prefix = prefixValueNode.getTextValue();
-        }
-      } else if (mappingTypeNode.getTextValue().equals("counter")) {
-        if (type != Schema.Type.INT && type != Schema.Type.LONG) {
-          throw new SchemaValidationException("counter mapping type must be an int or a long");
-        }
-        if (mappingValueNode == null) {
-          throw new SchemaValidationException(
-              "counter mapping type must contain a value.");
-        }
-        mappingType = MappingType.COUNTER;
-        mappingValue = mappingValueNode.getTextValue();
-      } else if (mappingTypeNode.getTextValue().equals("occVersion")) {
-        mappingType = MappingType.OCC_VERSION;
-      } else if (mappingTypeNode.getTextValue().equals("key")) {
-        mappingType = MappingType.KEY;
-        if (mappingValueNode == null) {
-          throw new SchemaValidationException(
-              "key mapping type must contain an integer value specifying it's key order.");
-        }
-        mappingValue = mappingValueNode.getTextValue();
-      }
-      Object defaultValue = defaultValueMap.get(fieldName);
-      fieldMapping = new FieldMapping(fieldName, mappingType, mappingValue,
-          defaultValue, prefix);
+      return parser.parseFieldMapping(fieldName, type, mappingNode);
+    } else {
+      return null;
     }
-    return fieldMapping;
   }
 
-  private List<String> getTables(JsonNode avroRecordSchemaJson) {
-    if (avroRecordSchemaJson.get("tables") == null) {
-      return new ArrayList<String>();
+  private PartitionStrategy buildPartitionStrategyFromAnnotation(Schema schema,
+      JsonNode schemaAsJson, List<FieldMapping> fieldMappings) {
+    PartitionStrategyParser partitionStrategyParser = new PartitionStrategyParser(
+        schema);
+    String partitionStrategyStr = schemaAsJson.get("partitionStrategy")
+        .toString();
+    PartitionStrategy partitionStrategy = partitionStrategyParser
+        .parse(partitionStrategyStr);
+    // now validate that any key mapping types are only sourced by id field
+    // partitioners
+    for (FieldMapping fieldMapping : fieldMappings) {
+      if (fieldMapping.getMappingType() == MappingType.KEY) {
+        for (FieldPartitioner fp : partitionStrategy.getFieldPartitioners()) {
+          if (fp.getSourceName().equals(fieldMapping.getFieldName())
+              && !fp.getClass().equals(IdentityFieldPartitioner.class)) {
+            throw new SchemaValidationException(
+                "KEY mapping only valid with IdentityFieldPartitioner. Not "
+                    + fp.getClass().getName());
+          }
+        }
+      }
     }
-    List<String> result = new ArrayList<String>(avroRecordSchemaJson.get(
-        "tables").size());
-    for (Iterator<JsonNode> it = avroRecordSchemaJson.get("tables")
-        .getElements(); it.hasNext();) {
-      result.add(it.next().getTextValue());
+    return partitionStrategy;
+  }
+
+  private PartitionStrategy buildPartitionStrategyFromKeyMappings(
+      Schema schema, List<FieldMapping> fieldMappings) {
+    PartitionStrategy.Builder builder = new PartitionStrategy.Builder();
+    for (FieldMapping fieldMapping : fieldMappings) {
+      if (fieldMapping.getMappingType() == MappingType.KEY) {
+        Class<?> fieldClass;
+        Schema.Type schemaType = schema.getField(fieldMapping.getFieldName())
+            .schema().getType();
+        if (schemaType == Schema.Type.INT) {
+          fieldClass = Integer.class;
+        } else if (schemaType == Schema.Type.LONG) {
+          fieldClass = Long.class;
+        } else if (schemaType == Schema.Type.STRING) {
+          fieldClass = String.class;
+        } else {
+          throw new SchemaValidationException(
+              "KEY mapping type only valid for int, long, and string type. Given: "
+                  + schemaType.toString());
+        }
+        builder.identity(fieldMapping.getFieldName(), fieldClass, 1);
+      }
     }
-    return result;
+    return builder.build();
   }
 }

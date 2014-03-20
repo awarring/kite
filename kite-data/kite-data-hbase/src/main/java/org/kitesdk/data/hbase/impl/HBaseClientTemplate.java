@@ -229,8 +229,7 @@ public class HBaseClientTemplate {
         try {
           table.close();
         } catch (IOException e) {
-          throw new DatasetIOException("Error putting table back into pool",
-              e);
+          throw new DatasetIOException("Error putting table back into pool", e);
         }
       }
     }
@@ -330,8 +329,7 @@ public class HBaseClientTemplate {
         try {
           table.close();
         } catch (IOException e) {
-          throw new DatasetIOException("Error putting table back into pool",
-              e);
+          throw new DatasetIOException("Error putting table back into pool", e);
         }
       }
     }
@@ -519,8 +517,7 @@ public class HBaseClientTemplate {
         try {
           table.close();
         } catch (IOException e) {
-          throw new DatasetIOException("Error putting table back into pool",
-              e);
+          throw new DatasetIOException("Error putting table back into pool", e);
         }
       }
     }
@@ -613,8 +610,8 @@ public class HBaseClientTemplate {
   }
 
   /**
-   * Refactored the key subsystem by removing the "StorageKey" wrapper type, Get an
-   * EntityScannerBuilder that the client can use to build an EntityScanner.
+   * Get an EntityScannerBuilder that the client can use to build an
+   * EntityScanner.
    * 
    * @param entityMapper
    *          The EntityMapper to use to map rows to entities.
@@ -630,12 +627,28 @@ public class HBaseClientTemplate {
     return builder;
   }
 
+  /**
+   * Create an EntityBatch that can be used to write batches of entities.
+   * 
+   * @param entityMapper
+   *          The EntityMapper to use to map rows to entities.
+   * @param writeBufferSize
+   *          The buffer size used when writing batches
+   * @return EntityBatch
+   */
   public <E> EntityBatch<E> createBatch(EntityMapper<E> entityMapper,
       long writeBufferSize) {
     return new BaseEntityBatch<E>(this, entityMapper, pool, tableName,
         writeBufferSize);
   }
 
+  /**
+   * Create an EntityBatch that can be used to write batches of entities.
+   * 
+   * @param entityMapper
+   *          The EntityMapper to use to map rows to entities.
+   * @return EntityBatch
+   */
   public <E> EntityBatch<E> createBatch(EntityMapper<E> entityMapper) {
     return new BaseEntityBatch<E>(this, entityMapper, pool, tableName);
   }

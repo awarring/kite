@@ -15,21 +15,18 @@
  */
 package org.kitesdk.data.hbase.avro;
 
-import org.kitesdk.data.DatasetException;
-import org.kitesdk.data.SchemaValidationException;
-import org.kitesdk.data.hbase.impl.EntityComposer;
-import org.kitesdk.data.hbase.impl.EntitySchema.FieldMapping;
-import org.kitesdk.data.hbase.impl.MappingType;
-
-import java.util.Arrays;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 
 import org.apache.avro.Schema;
 import org.apache.avro.Schema.Field;
 import org.apache.avro.generic.IndexedRecord;
+import org.kitesdk.data.DatasetException;
+import org.kitesdk.data.SchemaValidationException;
+import org.kitesdk.data.ColumnMappingDescriptor.MappingType;
+import org.kitesdk.data.hbase.impl.EntityComposer;
+import org.kitesdk.data.spi.FieldMapping;
 
 /**
  * An EntityComposer implementation for Avro records. It will handle both
@@ -66,11 +63,6 @@ public class AvroEntityComposer<E extends IndexedRecord> implements
    * parts.
    */
   private final Map<String, AvroRecordBuilderFactory<E>> kacRecordBuilderFactories;
-  
-  /**
-   * The number of key parts in the entity schema.
-   */
-  private final int keyPartCount;
 
   /**
    * AvroEntityComposer constructor.
@@ -87,13 +79,6 @@ public class AvroEntityComposer<E extends IndexedRecord> implements
     this.recordBuilderFactory = buildAvroRecordBuilderFactory(avroEntitySchema
         .getAvroSchema());
     this.kacRecordBuilderFactories = new HashMap<String, AvroRecordBuilderFactory<E>>();
-    int keyPartCount = 0;
-    for (FieldMapping fieldMapping : avroEntitySchema.getFieldMappings()) {
-      if (fieldMapping.getMappingType() == MappingType.KEY) {
-        keyPartCount++;
-      }
-    }
-    this.keyPartCount = keyPartCount;
     initRecordBuilderFactories();
   }
 
@@ -206,7 +191,7 @@ public class AvroEntityComposer<E extends IndexedRecord> implements
    * constructed by the composer.
    */
   private void initRecordBuilderFactories() {
-    for (FieldMapping fieldMapping : avroSchema.getFieldMappings()) {
+    for (FieldMapping fieldMapping : avroSchema.getColumnMappingDescriptor().getFieldMappings()) {
       if (fieldMapping.getMappingType() == MappingType.KEY_AS_COLUMN) {
         String fieldName = fieldMapping.getFieldName();
         Schema fieldSchema = avroSchema.getAvroSchema().getField(fieldName)
@@ -276,18 +261,5 @@ public class AvroEntityComposer<E extends IndexedRecord> implements
       // not a primitive type, so return null
       return null;
     }
-  }
-
-  @Override
-  public List<Object> getPartitionKeyParts(E entity) {
-    Object[] parts = new Object[keyPartCount];
-    for (FieldMapping fieldMapping : avroSchema.getFieldMappings()) {
-      if (fieldMapping.getMappingType() == MappingType.KEY) {
-        int pos = avroSchema.getAvroSchema()
-            .getField(fieldMapping.getFieldName()).pos();
-        parts[Integer.parseInt(fieldMapping.getMappingValue())] = entity.get(pos);
-      }
-    }
-    return Arrays.asList(parts);
   }
 }

@@ -16,21 +16,32 @@
 
 package org.kitesdk.data.spi;
 
-import org.joda.time.DateTime;
-import org.joda.time.DateTimeZone;
-import org.kitesdk.data.*;
-import org.kitesdk.data.event.StandardEvent;
 import com.google.common.collect.Sets;
+
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Set;
+
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
+import org.joda.time.DateTime;
+import org.joda.time.DateTimeZone;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
+import org.kitesdk.data.Dataset;
+import org.kitesdk.data.DatasetDescriptor;
+import org.kitesdk.data.DatasetReader;
+import org.kitesdk.data.DatasetRepository;
+import org.kitesdk.data.DatasetWriter;
+import org.kitesdk.data.MiniDFSTest;
+import org.kitesdk.data.PartitionStrategy;
+import org.kitesdk.data.RefinableView;
+import org.kitesdk.data.TestHelpers;
+import org.kitesdk.data.View;
+import org.kitesdk.data.event.StandardEvent;
 
 @RunWith(Parameterized.class)
 public abstract class TestRefinableViews extends MiniDFSTest {
@@ -760,7 +771,7 @@ public abstract class TestRefinableViews extends MiniDFSTest {
   @Test
   public void testNotPartitioned() throws Exception {
     final DatasetDescriptor flatDescriptor = new DatasetDescriptor
-        .Builder(testDescriptor).partitionStrategy(null).build();
+        .Builder(testDescriptor).partitionStrategy((PartitionStrategy)null).build();
     final Dataset<StandardEvent> notPartitioned =
         repo.create("flat", flatDescriptor);
 

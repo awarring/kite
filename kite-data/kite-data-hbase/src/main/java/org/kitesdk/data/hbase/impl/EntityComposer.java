@@ -76,8 +76,6 @@ public interface EntityComposer<E> {
    */
   public Object buildKeyAsColumnField(String fieldName,
       Map<CharSequence, Object> keyAsColumnValues);
-  
-  public List<Object> getPartitionKeyParts(E entity);
 
   /**
    * An interface for entity builders.

@@ -24,7 +24,6 @@ import org.apache.avro.Schema.Field;
 import org.kitesdk.data.spi.FieldPartitioner;
 import org.kitesdk.data.PartitionStrategy;
 import org.kitesdk.data.hbase.impl.KeySchema;
-import org.kitesdk.data.hbase.impl.EntitySchema.FieldMapping;
 
 /**
  * A KeySchema implementation powered by Avro.
@@ -33,33 +32,25 @@ public class AvroKeySchema extends KeySchema {
 
   private final Schema schema;
 
-  /**
-   * Constructor for the AvroKeySchema.
-   * 
-   * @param schema
-   *          The Avro Schema that underlies this KeySchema implementation
-   * @param rawSchema
-   *          The Avro Schema as a string that underlies the KeySchema
-   *          implementation
-   */
-  public AvroKeySchema(Schema schema, String rawSchema,
-      List<FieldMapping> keyFieldMappings) {
-    super(rawSchema, keyFieldMappings);
-    List<Field> fieldsPartOfKey = new ArrayList<Field>();
-    for (Field field : schema.getFields()) {
-      for (FieldMapping fieldMapping : keyFieldMappings) {
-        if (field.name().equals(fieldMapping.getFieldName())) {
-          fieldsPartOfKey.add(AvroUtils.cloneField(field));
-        }
-      }
-    }
-    this.schema = Schema.createRecord(fieldsPartOfKey);
-  }
-
   public AvroKeySchema(Schema schema, String rawSchema,
       PartitionStrategy partitionStrategy) {
     super(rawSchema, partitionStrategy);
-    this.schema = schema;
+    List<Field> fieldsPartOfKey = new ArrayList<Field>();
+    for (FieldPartitioner<?, ?> fieldPartitioner : partitionStrategy.getFieldPartitioners()) {
+      Class<?> fieldType = fieldPartitioner.getType();
+      Schema fieldSchema;
+      if (fieldType == Integer.class) {
+        fieldSchema = Schema.create(Schema.Type.INT);
+      } else if (fieldType == Long.class) {
+        fieldSchema = Schema.create(Schema.Type.LONG);
+      } else if (fieldType == String.class) {
+        fieldSchema = Schema.create(Schema.Type.STRING);
+      }  else {
+        throw new RuntimeException();
+      }
+      fieldsPartOfKey.add(new Field(fieldPartitioner.getSourceName(), fieldSchema, null, null));
+    }
+    this.schema = Schema.createRecord(fieldsPartOfKey);
   }
 
   @Override

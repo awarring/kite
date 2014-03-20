@@ -15,23 +15,13 @@
  */
 package org.kitesdk.data;
 
-import org.kitesdk.data.spi.URIPattern;
 import com.google.common.base.Objects;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Maps;
 import com.google.common.io.Closeables;
 import com.google.common.io.Resources;
-import org.apache.avro.Schema;
-import org.apache.avro.file.DataFileReader;
-import org.apache.avro.file.DataFileStream;
-import org.apache.avro.generic.GenericDatumReader;
-import org.apache.avro.generic.GenericRecord;
-import org.apache.avro.reflect.ReflectData;
-import org.apache.hadoop.fs.Path;
 
-import javax.annotation.Nullable;
-import javax.annotation.concurrent.Immutable;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
@@ -41,7 +31,21 @@ import java.net.URISyntaxException;
 import java.net.URL;
 import java.util.Collection;
 import java.util.Map;
+
+import javax.annotation.Nullable;
+import javax.annotation.concurrent.Immutable;
+
+import org.apache.avro.Schema;
+import org.apache.avro.file.DataFileReader;
+import org.apache.avro.file.DataFileStream;
+import org.apache.avro.generic.GenericDatumReader;
+import org.apache.avro.generic.GenericRecord;
+import org.apache.avro.reflect.ReflectData;
+import org.apache.hadoop.fs.Path;
+import org.kitesdk.data.spi.ColumnMappingDescriptorParser;
+import org.kitesdk.data.spi.PartitionStrategyParser;
 import org.kitesdk.data.spi.SchemaUtil;
+import org.kitesdk.data.spi.URIPattern;
 
 /**
  * <p>
@@ -63,18 +67,34 @@ public class DatasetDescriptor {
   private final URI location;
   private final Map<String, String> properties;
   private final PartitionStrategy partitionStrategy;
+  private final ColumnMappingDescriptor columnMappingDescriptor;
 
   /**
-   * Create an instance of this class with the supplied {@link Schema},
-   * optional URL, {@link Format}, optional location URL, and optional
+   * Create an instance of this class with the supplied {@link Schema}, optional
+   * URL, {@link Format}, optional location URL, and optional
    * {@link PartitionStrategy}.
    */
-  public DatasetDescriptor(Schema schema, @Nullable URL schemaUrl, Format format,
-      @Nullable URI location, @Nullable Map<String, String> properties,
+  public DatasetDescriptor(Schema schema, @Nullable URL schemaUrl,
+      Format format, @Nullable URI location,
+      @Nullable Map<String, String> properties,
       @Nullable PartitionStrategy partitionStrategy) {
+    this(schema, schemaUrl, format, location, properties, partitionStrategy,
+        null);
+  }
+
+  /**
+   * Create an instance of this class with the supplied {@link Schema}, optional
+   * URL, {@link Format}, optional location URL, optional
+   * {@link PartitionStrategy}, and optional {@link ColumnMappingDescriptor}.
+   */
+  public DatasetDescriptor(Schema schema, @Nullable URL schemaUrl,
+      Format format, @Nullable URI location,
+      @Nullable Map<String, String> properties,
+      @Nullable PartitionStrategy partitionStrategy,
+      @Nullable ColumnMappingDescriptor columnMappingDescriptor) {
     // URI can be null if the descriptor is configuring a new Dataset
-    Preconditions.checkArgument(
-        (location == null) || (location.getScheme() != null),
+    Preconditions.checkArgument((location == null)
+        || (location.getScheme() != null),
         "Location URIs must be fully-qualified and have a FS scheme.");
 
     this.schema = schema;
@@ -87,6 +107,7 @@ public class DatasetDescriptor {
       this.properties = ImmutableMap.of();
     }
     this.partitionStrategy = partitionStrategy;
+    this.columnMappingDescriptor = columnMappingDescriptor;
   }
 
   /**
@@ -95,7 +116,7 @@ public class DatasetDescriptor {
    * types) or complex (i.e. containing other records, lists, and so on).
    * Validation of the supported schemas is performed by the managing
    * repository, not the dataset or descriptor itself.
-   *
+   * 
    * @return the schema
    */
   public Schema getSchema() {
@@ -106,7 +127,7 @@ public class DatasetDescriptor {
    * Get a URL from which the {@link Schema} may be retrieved (optional). This
    * method may return {@code null} if the schema is not stored at a persistent
    * URL, e.g. if it was constructed from a literal string.
-   *
+   * 
    * @return a URL from which the schema may be retrieved
    * @since 0.3.0
    */
@@ -117,7 +138,7 @@ public class DatasetDescriptor {
 
   /**
    * Get the associated {@link Format} that the data is stored in.
-   *
+   * 
    * @return the format
    * @since 0.2.0
    */
@@ -128,9 +149,9 @@ public class DatasetDescriptor {
   /**
    * Get the URL location where the data for this {@link Dataset} is stored
    * (optional).
-   *
+   * 
    * @return a location URL or null if one is not set
-   *
+   * 
    * @since 0.8.0
    */
   @Nullable
@@ -140,10 +161,11 @@ public class DatasetDescriptor {
 
   /**
    * Get a named property.
-   *
-   * @param name the String property name to get.
+   * 
+   * @param name
+   *          the String property name to get.
    * @return the String value of the property, or null if it does not exist.
-   *
+   * 
    * @since 0.8.0
    */
   @Nullable
@@ -153,10 +175,11 @@ public class DatasetDescriptor {
 
   /**
    * Check if a named property exists.
-   *
-   * @param name the String property name.
+   * 
+   * @param name
+   *          the String property name.
    * @return true if the property exists, false otherwise.
-   *
+   * 
    * @since 0.8.0
    */
   public boolean hasProperty(String name) {
@@ -165,9 +188,9 @@ public class DatasetDescriptor {
 
   /**
    * List the names of all custom properties set.
-   *
+   * 
    * @return a Collection of String property names.
-   *
+   * 
    * @since 0.8.0
    */
   public Collection<String> listProperties() {
@@ -181,12 +204,21 @@ public class DatasetDescriptor {
    */
   public PartitionStrategy getPartitionStrategy() {
     Preconditions
-      .checkState(
-        isPartitioned(),
-        "Attempt to retrieve the partition strategy on a non-partitioned descriptor:%s",
-        this);
+        .checkState(
+            isPartitioned(),
+            "Attempt to retrieve the partition strategy on a non-partitioned descriptor:%s",
+            this);
 
     return partitionStrategy;
+  }
+
+  /**
+   * Get the {@link ColumnMappingDescriptor}.
+   * 
+   * @return ColumnMappingDescriptor
+   */
+  public ColumnMappingDescriptor getColumnMappingDescriptor() {
+    return columnMappingDescriptor;
   }
 
   /**
@@ -197,10 +229,18 @@ public class DatasetDescriptor {
     return partitionStrategy != null;
   }
 
+  /**
+   * Returns true if an associated dataset is column mapped (that is, has an
+   * associated {@link ColumnMappingDescriptor}), false otherwise.
+   */
+  public boolean isColumnMapped() {
+    return columnMappingDescriptor != null;
+  }
+
   @Override
   public int hashCode() {
-    return Objects.hashCode(
-        schema, format, location, properties, partitionStrategy);
+    return Objects.hashCode(schema, format, location, properties,
+        partitionStrategy);
   }
 
   @Override
@@ -212,23 +252,19 @@ public class DatasetDescriptor {
       return false;
     }
     final DatasetDescriptor other = (DatasetDescriptor) obj;
-    return (
-        Objects.equal(schema, other.schema) &&
-        Objects.equal(format, other.format) &&
-        Objects.equal(location, other.location) &&
-        Objects.equal(properties, other.properties) &&
-        Objects.equal(partitionStrategy, other.partitionStrategy));
+    return (Objects.equal(schema, other.schema)
+        && Objects.equal(format, other.format)
+        && Objects.equal(location, other.location)
+        && Objects.equal(properties, other.properties) && Objects.equal(
+        partitionStrategy, other.partitionStrategy));
   }
 
   @Override
   public String toString() {
-    return Objects.toStringHelper(this)
-        .add("format", format)
-        .add("schema", schema)
-        .add("location", location)
+    return Objects.toStringHelper(this).add("format", format)
+        .add("schema", schema).add("location", location)
         .add("properties", properties)
-        .add("partitionStrategy", partitionStrategy)
-        .toString();
+        .add("partitionStrategy", partitionStrategy).toString();
   }
 
   /**
@@ -238,8 +274,8 @@ public class DatasetDescriptor {
 
     // used to match resource:schema.avsc URIs
     private static final String RESOURCE_PATH = "resource-path";
-    private static final URIPattern RESOURCE_URI_PATTERN =
-        new URIPattern(URI.create("resource:*" + RESOURCE_PATH));
+    private static final URIPattern RESOURCE_URI_PATTERN = new URIPattern(
+        URI.create("resource:*" + RESOURCE_PATH));
 
     private Schema schema;
     private URL schemaUrl;
@@ -247,6 +283,13 @@ public class DatasetDescriptor {
     private URI location;
     private Map<String, String> properties;
     private PartitionStrategy partitionStrategy;
+    private String partitionStrategyLiteral;
+    private File partitionStrategyFile;
+    private InputStream partitionStrategyIN;
+    private ColumnMappingDescriptor columnMappingDescriptor;
+    private String columnMappingDescriptorLiteral;
+    private File columnMappingDescriptorFile;
+    private InputStream columnMappingDescriptorIN;
 
     public Builder() {
       this.properties = Maps.newHashMap();
@@ -256,8 +299,9 @@ public class DatasetDescriptor {
      * Creates a Builder configured to copy {@code descriptor}, if it is not
      * modified. This is intended to help callers copy and update descriptors
      * even though they are {@link Immutable}.
-     *
-     * @param descriptor A {@link DatasetDescriptor} to copy settings from
+     * 
+     * @param descriptor
+     *          A {@link DatasetDescriptor} to copy settings from
      * @since 0.7.0
      */
     public Builder(DatasetDescriptor descriptor) {
@@ -276,7 +320,7 @@ public class DatasetDescriptor {
      * Configure the dataset's schema. A schema is required, and may be set
      * using one of the methods: {@code schema}, {@code schemaLiteral},
      * {@code schemaUri}, or {@code schemaFromAvroDataFile}.
-     *
+     * 
      * @return An instance of the builder for method chaining.
      */
     public Builder schema(Schema schema) {
@@ -290,7 +334,7 @@ public class DatasetDescriptor {
      * and may be set using one of the methods: {@code schema},
      * {@code schemaLiteral}, {@code schemaUri}, or
      * {@code schemaFromAvroDataFile}.
-     *
+     * 
      * @return An instance of the builder for method chaining.
      */
     public Builder schema(File file) throws IOException {
@@ -305,7 +349,7 @@ public class DatasetDescriptor {
      * required, and may be set using one of the methods: {@code schema},
      * {@code schemaLiteral}, {@code schemaUri}, or
      * {@code schemaFromAvroDataFile}.
-     *
+     * 
      * @return An instance of the builder for method chaining.
      */
     public Builder schema(InputStream in) throws IOException {
@@ -318,20 +362,22 @@ public class DatasetDescriptor {
      * and may be set using one of the methods: {@code schema},
      * {@code schemaLiteral}, {@code schemaUri}, or
      * {@code schemaFromAvroDataFile}.
-     *
-     * @param uri a URI object for the schema's location.
+     * 
+     * @param uri
+     *          a URI object for the schema's location.
      * @return An instance of the builder for method chaining.
-     * @throws MalformedURLException if {@code uri} is not a valid URL
+     * @throws MalformedURLException
+     *           if {@code uri} is not a valid URL
      * @throws IOException
-     *
+     * 
      * @since 0.8.0
      */
     public Builder schemaUri(URI uri) throws IOException {
       // special support for resource URIs
       Map<String, String> match = RESOURCE_URI_PATTERN.getMatch(uri);
       if (match != null) {
-        return schema(
-            Resources.getResource(match.get(RESOURCE_PATH)).openStream());
+        return schema(Resources.getResource(match.get(RESOURCE_PATH))
+            .openStream());
       }
 
       this.schemaUrl = toURL(uri);
@@ -352,13 +398,16 @@ public class DatasetDescriptor {
      * required, and may be set using one of the methods: {@code schema},
      * {@code schemaLiteral}, {@code schemaUri}, or
      * {@code schemaFromAvroDataFile}.
-     *
-     * @param uri a String URI
+     * 
+     * @param uri
+     *          a String URI
      * @return An instance of the builder for method chaining.
-     * @throws URISyntaxException if {@code uri} is not a valid URI
-     * @throws MalformedURLException if {@code uri} is not a valid URL
+     * @throws URISyntaxException
+     *           if {@code uri} is not a valid URI
+     * @throws MalformedURLException
+     *           if {@code uri} is not a valid URL
      * @throws IOException
-     *
+     * 
      * @since 0.8.0
      */
     public Builder schemaUri(String uri) throws URISyntaxException, IOException {
@@ -371,7 +420,8 @@ public class DatasetDescriptor {
         return uri.toURL();
       } catch (MalformedURLException e) {
         // if that fails then try using the Hadoop protocol handler
-        return new URL(null, uri.toString(), new HadoopFileSystemURLStreamHandler());
+        return new URL(null, uri.toString(),
+            new HadoopFileSystemURLStreamHandler());
       }
     }
 
@@ -380,9 +430,9 @@ public class DatasetDescriptor {
      * required, and may be set using one of the methods: {@code schema},
      * {@code schemaLiteral}, {@code schemaUri}, or
      * {@code schemaFromAvroDataFile}.
-     *
+     * 
      * @return An instance of the builder for method chaining.
-     *
+     * 
      * @since 0.8.0
      */
     public Builder schemaLiteral(String s) {
@@ -395,7 +445,7 @@ public class DatasetDescriptor {
      * required, and may be set using one of the methods: {@code schema},
      * {@code schemaLiteral}, {@code schemaUri}, or
      * {@code schemaFromAvroDataFile}.
-     *
+     * 
      * @return An instance of the builder for method chaining.
      * @since 0.2.0
      */
@@ -409,7 +459,7 @@ public class DatasetDescriptor {
      * data file. A schema is required, and may be set using one of the methods:
      * {@code schema}, {@code schemaLiteral}, {@code schemaUri}, or
      * {@code schemaFromAvroDataFile}.
-     *
+     * 
      * @return An instance of the builder for method chaining.
      */
     public Builder schemaFromAvroDataFile(File file) throws IOException {
@@ -430,9 +480,9 @@ public class DatasetDescriptor {
      * Configure the dataset's schema by using the schema from an existing Avro
      * data file. It is the caller's responsibility to close the
      * {@link InputStream}. A schema is required, and may be set using one of
-     * the methods: {@code schema},  {@code schemaLiteral}, {@code schemaUri},
-     * or {@code schemaFromAvroDataFile}.
-     *
+     * the methods: {@code schema}, {@code schemaLiteral}, {@code schemaUri}, or
+     * {@code schemaFromAvroDataFile}.
+     * 
      * @return An instance of the builder for method chaining.
      */
     public Builder schemaFromAvroDataFile(InputStream in) throws IOException {
@@ -454,7 +504,7 @@ public class DatasetDescriptor {
      * data file. A schema is required, and may be set using one of the methods:
      * {@code schema}, {@code schemaLiteral}, {@code schemaUri}, or
      * {@code schemaFromAvroDataFile}.
-     *
+     * 
      * @return An instance of the builder for method chaining.
      */
     public Builder schemaFromAvroDataFile(URI uri) throws IOException {
@@ -472,7 +522,7 @@ public class DatasetDescriptor {
     /**
      * Configure the dataset's format (optional). If not specified
      * {@link Formats#AVRO} is used by default.
-     *
+     * 
      * @return An instance of the builder for method chaining.
      * @since 0.2.0
      */
@@ -484,11 +534,13 @@ public class DatasetDescriptor {
     /**
      * Configure the dataset's format from a format name String (optional). If
      * not specified, {@link Formats#AVRO} will be used.
-     *
-     * @param formatName a String format name
+     * 
+     * @param formatName
+     *          a String format name
      * @return An instance of the builder for method chaining.
-     * @throws UnknownFormatException if the format name is not recognized.
-     *
+     * @throws UnknownFormatException
+     *           if the format name is not recognized.
+     * 
      * @since 0.8.0
      */
     public Builder format(String formatName) {
@@ -497,10 +549,11 @@ public class DatasetDescriptor {
 
     /**
      * Configure the {@link Dataset}'s location (optional).
-     *
-     * @param uri A URI location
+     * 
+     * @param uri
+     *          A URI location
      * @return An instance of the builder for method chaining.
-     *
+     * 
      * @since 0.8.0
      */
     public Builder location(@Nullable URI uri) {
@@ -513,10 +566,11 @@ public class DatasetDescriptor {
 
     /**
      * Configure the {@link Dataset}'s location (optional).
-     *
-     * @param uri A location Path
+     * 
+     * @param uri
+     *          A location Path
      * @return An instance of the builder for method chaining.
-     *
+     * 
      * @since 0.8.0
      */
     public Builder location(Path uri) {
@@ -525,11 +579,13 @@ public class DatasetDescriptor {
 
     /**
      * Configure the {@link Dataset}'s location (optional).
-     *
-     * @param uri A location String URI
+     * 
+     * @param uri
+     *          A location String URI
      * @return An instance of the builder for method chaining.
-     * @throws URISyntaxException if {@code uri} is not a valid URI
-     *
+     * @throws URISyntaxException
+     *           if {@code uri} is not a valid URI
+     * 
      * @since 0.8.0
      */
     public Builder location(String uri) throws URISyntaxException {
@@ -538,11 +594,13 @@ public class DatasetDescriptor {
 
     /**
      * Add a key-value property to the descriptor.
-     *
-     * @param name the property name
-     * @param value the property value
+     * 
+     * @param name
+     *          the property name
+     * @param value
+     *          the property value
      * @return An instance of the builder for method chaining.
-     *
+     * 
      * @since 0.8.0
      */
     public Builder property(String name, String value) {
@@ -552,47 +610,187 @@ public class DatasetDescriptor {
 
     /**
      * Configure the dataset's partitioning strategy (optional).
-     *
+     * 
      * @return An instance of the builder for method chaining.
      */
     public Builder partitionStrategy(
-      @Nullable PartitionStrategy partitionStrategy) {
+        @Nullable PartitionStrategy partitionStrategy) {
       this.partitionStrategy = partitionStrategy;
+      this.partitionStrategyLiteral = null;
+      this.partitionStrategyFile = null;
+      this.partitionStrategyIN = null;
+      return this;
+    }
+
+    /**
+     * Configure the dataset's partition strategy from a literal of the
+     * partition strategy JSON format.
+     * 
+     * @param columnMappingDescriptorLiteral
+     * @return
+     */
+    public Builder partitionStrategy(String literal) {
+      this.partitionStrategy = null;
+      this.partitionStrategyLiteral = literal;
+      this.partitionStrategyFile = null;
+      this.partitionStrategyIN = null;
+      return this;
+    }
+
+    /**
+     * Configure the dataset's partition strategy from a File containing the
+     * partition strategy literal JSON format.
+     * 
+     * @param file
+     *          The file
+     * @return An instance of the builder for method chaining.
+     */
+    public Builder partitionStrategy(File file) {
+      this.partitionStrategy = null;
+      this.partitionStrategyLiteral = null;
+      this.partitionStrategyFile = file;
+      this.partitionStrategyIN = null;
+      return this;
+    }
+
+    /**
+     * Configure the dataset's partition strategy from an input stream
+     * containing the partition strategy literal JSON format.
+     * 
+     * @param in
+     *          The input stream
+     * @return An instance of the builder for method chaining.
+     */
+    public Builder partitionStrategy(InputStream in) {
+      this.partitionStrategy = null;
+      this.partitionStrategyLiteral = null;
+      this.partitionStrategyFile = null;
+      this.partitionStrategyIN = in;
+      return this;
+    }
+
+    /**
+     * Configure the dataset's column mapping descriptor (optional)
+     * 
+     * @param columnMappingDescriptor
+     * 
+     * @return An instance of the builder for method chaining.
+     */
+    public Builder columnMappingDescriptor(
+        @Nullable ColumnMappingDescriptor columnMappingDescriptor) {
+      this.columnMappingDescriptor = columnMappingDescriptor;
+      this.columnMappingDescriptorLiteral = null;
+      this.columnMappingDescriptorFile = null;
+      this.columnMappingDescriptorIN = null;
+      return this;
+    }
+
+    /**
+     * Configure the dataset's column mapping descriptor from a literal of the
+     * column mapping descriptor JSON format.
+     * 
+     * @param columnMappingDescriptorLiteral
+     * @return
+     */
+    public Builder columnMappingDescriptor(String literal) {
+      this.columnMappingDescriptor = null;
+      this.columnMappingDescriptorLiteral = literal;
+      this.columnMappingDescriptorFile = null;
+      this.columnMappingDescriptorIN = null;
+      return this;
+    }
+
+    /**
+     * Configure the dataset's column mapping descriptor from a File containing
+     * the column mapping descriptor literal JSON format.
+     * 
+     * @param file
+     *          The file
+     * @return An instance of the builder for method chaining.
+     */
+    public Builder columnMappingDescriptor(File file) {
+      this.columnMappingDescriptor = null;
+      this.columnMappingDescriptorLiteral = null;
+      this.columnMappingDescriptorFile = file;
+      this.columnMappingDescriptorIN = null;
+      return this;
+    }
+
+    /**
+     * Configure the dataset's column mapping descriptor from an input stream
+     * containing the column mapping descriptor literal JSON format.
+     * 
+     * @param in
+     *          The input stream
+     * @return An instance of the builder for method chaining.
+     */
+    public Builder columnMappingDescriptor(InputStream in) {
+      this.columnMappingDescriptor = null;
+      this.columnMappingDescriptorLiteral = null;
+      this.columnMappingDescriptorFile = null;
+      this.columnMappingDescriptorIN = in;
       return this;
     }
 
     /**
      * Build an instance of the configured dataset descriptor. Subsequent calls
      * will produce new instances that are similarly configured.
-     *
+     * 
      * @since 0.9.0
      */
     public DatasetDescriptor build() {
       Preconditions.checkState(schema != null,
           "Descriptor schema is required and cannot be null");
+
+      PartitionStrategyParser partitionStrategyParser = new PartitionStrategyParser(
+          schema);
+      if (partitionStrategyLiteral != null) {
+        partitionStrategy = partitionStrategyParser
+            .parse(partitionStrategyLiteral);
+      } else if (partitionStrategyFile != null) {
+        partitionStrategy = partitionStrategyParser
+            .parse(partitionStrategyFile);
+      } else if (partitionStrategyIN != null) {
+        partitionStrategy = partitionStrategyParser.parse(partitionStrategyIN);
+      }
+
       checkPartitionStrategy(schema, partitionStrategy);
 
-      return new DatasetDescriptor(
-          schema, schemaUrl, format, location, properties, partitionStrategy);
+      ColumnMappingDescriptorParser columnMappingDescriptorParser = new ColumnMappingDescriptorParser(
+          schema);
+      if (columnMappingDescriptorLiteral != null) {
+        columnMappingDescriptor = columnMappingDescriptorParser
+            .parse(columnMappingDescriptorLiteral);
+      } else if (columnMappingDescriptorFile != null) {
+        columnMappingDescriptor = columnMappingDescriptorParser
+            .parse(columnMappingDescriptorFile);
+      } else if (columnMappingDescriptorIN != null) {
+        columnMappingDescriptor = columnMappingDescriptorParser
+            .parse(columnMappingDescriptorIN);
+      }
+
+      return new DatasetDescriptor(schema, schemaUrl, format, location,
+          properties, partitionStrategy, columnMappingDescriptor);
     }
 
-    private static void checkPartitionStrategy(Schema schema, PartitionStrategy strategy) {
+    private static void checkPartitionStrategy(Schema schema,
+        PartitionStrategy strategy) {
       if (strategy == null) {
         return;
       }
       Preconditions.checkState(schema.getType() == Schema.Type.RECORD,
           "Cannot partition non-records: " + schema);
-      for (org.kitesdk.data.spi.FieldPartitioner fp : strategy.getFieldPartitioners()) {
+      for (org.kitesdk.data.spi.FieldPartitioner fp : strategy
+          .getFieldPartitioners()) {
         // the source name should be a field in the schema, but not necessarily
         // the record.
         Schema.Field field = schema.getField(fp.getSourceName());
         Preconditions.checkState(field != null,
             "Cannot partition on {} (missing from schema)", fp.getSourceName());
-        Preconditions.checkState(
-            SchemaUtil.isConsistentWithExpectedType(
-                field.schema().getType(), fp.getSourceType()),
-            "Field type {} does not match partitioner {}",
-            field.schema().getType(), fp);
+        Preconditions.checkState(SchemaUtil.isConsistentWithExpectedType(field
+            .schema().getType(), fp.getSourceType()),
+            "Field type {} does not match partitioner {}", field.schema()
+                .getType(), fp);
       }
     }
   }

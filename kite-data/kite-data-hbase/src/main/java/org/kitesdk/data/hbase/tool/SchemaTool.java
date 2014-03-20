@@ -252,7 +252,8 @@ public class SchemaTool {
       }
     } else {
       LOG.info("Creating Schema: (" + tableName + ", " + entityName + ")");
-      parser.parseEntitySchema(entitySchemaString).getRequiredColumnFamilies();
+      parser.parseEntitySchema(entitySchemaString).getColumnMappingDescriptor()
+          .getRequiredColumnFamilies();
       schemaManager.createSchema(tableName, entityName, entitySchemaString,
           "org.kitesdk.data.hbase.avro.AvroKeyEntitySchemaParser",
           "org.kitesdk.data.hbase.avro.AvroKeySerDe",
@@ -265,12 +266,14 @@ public class SchemaTool {
           HTableDescriptor desc = new HTableDescriptor(tableName);
           desc.addFamily(new HColumnDescriptor(Constants.SYS_COL_FAMILY));
           desc.addFamily(new HColumnDescriptor(Constants.OBSERVABLE_COL_FAMILY));
-          for (String columnFamily : entitySchema.getRequiredColumnFamilies()) {
+          for (String columnFamily : entitySchema.getColumnMappingDescriptor()
+              .getRequiredColumnFamilies()) {
             desc.addFamily(new HColumnDescriptor(columnFamily));
           }
           hbaseAdmin.createTable(desc);
         } else {
-          Set<String> familiesToAdd = entitySchema.getRequiredColumnFamilies();
+          Set<String> familiesToAdd = entitySchema.getColumnMappingDescriptor()
+              .getRequiredColumnFamilies();
           familiesToAdd.add(new String(Constants.SYS_COL_FAMILY));
           familiesToAdd.add(new String(Constants.OBSERVABLE_COL_FAMILY));
           HTableDescriptor desc = hbaseAdmin.getTableDescriptor(tableName

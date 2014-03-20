@@ -15,14 +15,6 @@
  */
 package org.kitesdk.data.hbase.avro;
 
-import org.kitesdk.data.SchemaValidationException;
-import org.kitesdk.data.hbase.avro.io.ColumnDecoder;
-import org.kitesdk.data.hbase.avro.io.ColumnEncoder;
-import org.kitesdk.data.hbase.impl.EntityComposer;
-import org.kitesdk.data.hbase.impl.EntitySchema.FieldMapping;
-import org.kitesdk.data.hbase.impl.EntitySerDe;
-import org.kitesdk.data.hbase.impl.MappingType;
-
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
@@ -45,6 +37,13 @@ import org.apache.avro.io.EncoderFactory;
 import org.apache.avro.specific.SpecificDatumReader;
 import org.apache.avro.specific.SpecificDatumWriter;
 import org.apache.avro.util.Utf8;
+import org.kitesdk.data.SchemaValidationException;
+import org.kitesdk.data.ColumnMappingDescriptor.MappingType;
+import org.kitesdk.data.hbase.avro.io.ColumnDecoder;
+import org.kitesdk.data.hbase.avro.io.ColumnEncoder;
+import org.kitesdk.data.hbase.impl.EntityComposer;
+import org.kitesdk.data.hbase.impl.EntitySerDe;
+import org.kitesdk.data.spi.FieldMapping;
 
 /**
  * An EntitySerDe implementation that serializes and deserializes Avro records.
@@ -90,6 +89,11 @@ public class AvroEntitySerDe<E extends IndexedRecord> extends EntitySerDe<E> {
    * from the Avro entity's field to the inner map.
    */
   private final Map<String, Map<String, DatumWriter<Object>>> kacRecordDatumWriters = new HashMap<String, Map<String, DatumWriter<Object>>>();
+  
+  /**
+   * A mapping of field default values for fields that have them 
+   */
+  private final Map<String, Object> defaultValueMap;
 
   /**
    * Constructor for AvroEntitySerDe instances.
@@ -111,10 +115,11 @@ public class AvroEntitySerDe<E extends IndexedRecord> extends EntitySerDe<E> {
     super(entityComposer);
     this.specific = specific;
     this.avroSchema = avroSchema;
+    this.defaultValueMap = AvroUtils.getDefaultValueMap(avroSchema.getAvroSchema());
 
     // For each field in entity, initialize the appropriate datum readers and
     // writers.
-    for (FieldMapping fieldMapping : avroSchema.getFieldMappings()) {
+    for (FieldMapping fieldMapping : avroSchema.getColumnMappingDescriptor().getFieldMappings()) {
       String fieldName = fieldMapping.getFieldName();
       Schema fieldSchema = avroSchema.getAvroSchema().getField(fieldName)
           .schema();
@@ -294,6 +299,11 @@ public class AvroEntitySerDe<E extends IndexedRecord> extends EntitySerDe<E> {
       throw new SchemaValidationException("Unsupported type for keyAsColumn: "
           + schemaType);
     }
+  }
+  
+  @Override
+  public Object getDefaultValue(String fieldName) {
+    return defaultValueMap.get(fieldName);
   }
 
   private void initColumnDatumMaps(String fieldName, Schema fieldSchema,

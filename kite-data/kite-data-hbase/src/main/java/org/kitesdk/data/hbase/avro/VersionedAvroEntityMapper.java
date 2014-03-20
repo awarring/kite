@@ -303,24 +303,6 @@ public class VersionedAvroEntityMapper<ENTITY extends IndexedRecord> implements
    * metadata in each row to a ManagedSchemaEntityVersion record.
    */
   private void initializeEntityVersionEntityMapper() {
-    // Create a special key serde that doesn't try to serialize/deserialize
-    // the key for the ManagedSchemaEntityVersion record. This schema
-    // doesn't have any key mapping types since it's added to every table.
-    KeySerDe keySerDe = new KeySerDe() {
-      @Override
-      public byte[] serialize(PartitionKey partitionKey) {
-        return new byte[0];
-      }
-      @Override
-      public byte[] serialize(Object... keyPartValues) {
-        return new byte[0];
-      }
-      @Override
-      public PartitionKey deserialize(byte[] keyBytes) {
-        return null;
-      }
-    };
-    
     AvroEntitySchema avroEntitySchema = schemaParser
         .parseEntitySchema(managedSchemaEntityVersionSchema);
     avroEntitySchema = AvroUtils.mergeSpecificStringTypes(
@@ -330,7 +312,7 @@ public class VersionedAvroEntityMapper<ENTITY extends IndexedRecord> implements
     AvroEntitySerDe<ManagedSchemaEntityVersion> entitySerDe = new AvroEntitySerDe<ManagedSchemaEntityVersion>(
         entityComposer, avroEntitySchema, avroEntitySchema, true);
     this.managedSchemaEntityVersionEntityMapper = new BaseEntityMapper<ManagedSchemaEntityVersion>(
-        keySchema, avroEntitySchema, keySerDe, entitySerDe);
+        avroEntitySchema, entitySerDe);
   }
 
   /**

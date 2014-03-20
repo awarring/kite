@@ -15,17 +15,6 @@
  */
 package org.kitesdk.data.hbase.manager;
 
-import org.kitesdk.data.ConcurrentSchemaModificationException;
-import org.kitesdk.data.DatasetException;
-import org.kitesdk.data.IncompatibleSchemaException;
-import org.kitesdk.data.SchemaNotFoundException;
-import org.kitesdk.data.hbase.impl.EntitySchema;
-import org.kitesdk.data.hbase.impl.EntitySchema.FieldMapping;
-import org.kitesdk.data.hbase.impl.KeyEntitySchemaParser;
-import org.kitesdk.data.hbase.impl.KeySchema;
-import org.kitesdk.data.hbase.impl.MappingType;
-import org.kitesdk.data.hbase.impl.SchemaManager;
-import org.kitesdk.data.hbase.manager.generated.ManagedSchema;
 import com.google.common.collect.Lists;
 
 import java.util.ArrayList;
@@ -38,6 +27,17 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 import org.apache.hadoop.hbase.client.HTablePool;
+import org.kitesdk.data.ConcurrentSchemaModificationException;
+import org.kitesdk.data.DatasetException;
+import org.kitesdk.data.IncompatibleSchemaException;
+import org.kitesdk.data.SchemaNotFoundException;
+import org.kitesdk.data.ColumnMappingDescriptor.MappingType;
+import org.kitesdk.data.hbase.impl.EntitySchema;
+import org.kitesdk.data.hbase.impl.KeyEntitySchemaParser;
+import org.kitesdk.data.hbase.impl.KeySchema;
+import org.kitesdk.data.hbase.impl.SchemaManager;
+import org.kitesdk.data.hbase.manager.generated.ManagedSchema;
+import org.kitesdk.data.spi.FieldMapping;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -284,7 +284,9 @@ public class DefaultSchemaManager implements SchemaManager {
       EntitySchema entitySchema = schemaParser.parseEntitySchema(schemaString);
       if (!newKeySchema.compatible(keySchema)) {
         String msg = "StorageKey fields of entity schema not compatible with version "
-            + Integer.toString(version) + ": Old schema: " + schemaString
+            + Integer.toString(version)
+            + ": Old schema: "
+            + schemaString
             + " New schema: " + newEntitySchema.getRawSchema();
         throw new IncompatibleSchemaException(msg);
       }
@@ -574,7 +576,8 @@ public class DefaultSchemaManager implements SchemaManager {
     // against the second schema.
     Set<String> entitySchema1Columns = new HashSet<String>();
     List<String> entitySchema1KeyAsColumns = new ArrayList<String>();
-    for (FieldMapping fieldMapping1 : entitySchema1.getFieldMappings()) {
+    for (FieldMapping fieldMapping1 : entitySchema1
+        .getColumnMappingDescriptor().getFieldMappings()) {
       if (fieldMapping1.getMappingType() == MappingType.COLUMN) {
         entitySchema1Columns.add(fieldMapping1.getMappingValue());
       } else if (fieldMapping1.getMappingType() == MappingType.KEY_AS_COLUMN) {
@@ -603,7 +606,8 @@ public class DefaultSchemaManager implements SchemaManager {
     // the first schema's keyAsColumn mappings, and one of the first
     // schema's mappings isn't a prefix of this schema's keyAsColumn
     // mappings.
-    for (FieldMapping fieldMapping2 : entitySchema2.getFieldMappings()) {
+    for (FieldMapping fieldMapping2 : entitySchema2
+        .getColumnMappingDescriptor().getFieldMappings()) {
       if (fieldMapping2.getMappingType() == MappingType.COLUMN) {
         String value = fieldMapping2.getMappingValue();
         if (entitySchema1Columns.contains(value)) {
@@ -663,14 +667,16 @@ public class DefaultSchemaManager implements SchemaManager {
   private boolean validateCompatibleWithTableOccVersion(
       EntitySchema entitySchema1, EntitySchema entitySchema2) {
     boolean foundOccMapping = false;
-    for (FieldMapping fieldMapping : entitySchema1.getFieldMappings()) {
+    for (FieldMapping fieldMapping : entitySchema1.getColumnMappingDescriptor()
+        .getFieldMappings()) {
       if (fieldMapping.getMappingType() == MappingType.OCC_VERSION) {
         foundOccMapping = true;
         break;
       }
     }
     if (foundOccMapping) {
-      for (FieldMapping fieldMapping : entitySchema2.getFieldMappings()) {
+      for (FieldMapping fieldMapping : entitySchema2
+          .getColumnMappingDescriptor().getFieldMappings()) {
         if (fieldMapping.getMappingType() == MappingType.OCC_VERSION) {
           LOG.warn("Field: " + fieldMapping.getFieldName() + " in schema "
               + entitySchema2.getName()
